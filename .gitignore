@@ -1,0 +1,17 @@
+# GoLand / IntelliJ
+.idea/
+
+# OS files
+.DS_Store
+
+# Go build
+bin/
+*.exe
+*.out
+
+# logs
+data
+*.log
+
+# db
+*.db
