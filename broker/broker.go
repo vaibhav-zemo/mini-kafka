@@ -21,7 +21,7 @@ func (b *Broker) GetOrCreateTopic(name string) (*Topic, error) {
 		return topic, nil
 	}
 
-	topic, err := NewTopic(name)
+	topic, err := NewTopic(name, 3)
 	if err != nil {
 		return nil, err
 	}
