@@ -2,13 +2,15 @@ package broker
 
 import (
 	"fmt"
+	"mini-kafka/storage"
 	"mini-kafka/utils"
 )
 
 type Topic struct {
-	name       string
-	Partitions []*Partition
-	groups     map[string]*ConsumerGroup
+	name          string
+	Partitions    []*Partition
+	groups        map[string]*ConsumerGroup
+	offsetManager *storage.OffsetManager
 }
 
 func NewTopic(name string, numPartitions int) (*Topic, error) {
@@ -26,10 +28,13 @@ func NewTopic(name string, numPartitions int) (*Topic, error) {
 		partitions[i] = p
 	}
 
+	om, _ := storage.NewOffsetManager("data/offsets.log")
+
 	return &Topic{
-		name:       name,
-		Partitions: partitions,
-		groups:     groups,
+		name:          name,
+		Partitions:    partitions,
+		groups:        groups,
+		offsetManager: om,
 	}, nil
 }
 
@@ -91,14 +96,14 @@ func (t *Topic) ConsumeFromGroup(groupID, consumerID string) (string, int, int64
 
 	for partition, consumer := range group.assignments {
 		if consumer.ID == consumerID {
-			offset := group.offsets[partition]
+			offset := t.offsetManager.Get(groupID, t.name, partition)
 
 			msg, nextOffset, err := t.Partitions[partition].Consume(offset)
 			if err != nil {
 				continue
 			}
 
-			group.offsets[partition] = nextOffset
+			t.offsetManager.Save(groupID, t.name, partition, nextOffset)
 
 			return string(msg), partition, nextOffset, nil
 		}

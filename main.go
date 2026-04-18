@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/json"
+	"io"
 	"log"
 	"mini-kafka/broker"
+	"net"
 	"net/http"
 	"strconv"
 )
@@ -137,7 +140,7 @@ func consumeGroupHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func main() {
+func webServer() {
 	http.HandleFunc("/produce", produceHandler)
 	http.HandleFunc("/consume", consumeHandler)
 	http.HandleFunc("/join-group", joinGroupHandler)
@@ -145,4 +148,111 @@ func main() {
 
 	log.Println("Server running on :8080")
 	http.ListenAndServe(":8080", nil)
+}
+
+func main() {
+	go webServer()
+
+	ln, err := net.Listen("tcp", ":9092")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("TCP server running on :9092")
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			continue
+		}
+
+		go handleConnection(conn)
+	}
+}
+
+func handleConnection(conn net.Conn) {
+	defer conn.Close()
+
+	for {
+		req, err := readRequest(conn)
+		if err != nil {
+			return
+		}
+
+		resp := processRequest(req)
+
+		writeResponse(conn, resp)
+	}
+}
+
+func readRequest(conn net.Conn) (map[string]interface{}, error) {
+	lenBuf := make([]byte, 4)
+
+	_, err := conn.Read(lenBuf)
+	if err != nil {
+		return nil, err
+	}
+
+	msgLen := binary.BigEndian.Uint32(lenBuf)
+
+	data := make([]byte, msgLen)
+	_, err = io.ReadFull(conn, data)
+	if err != nil {
+		return nil, err
+	}
+
+	var req map[string]interface{}
+	json.Unmarshal(data, &req)
+
+	return req, nil
+}
+
+func writeResponse(conn net.Conn, resp interface{}) {
+	data, _ := json.Marshal(resp)
+
+	lenBuf := make([]byte, 4)
+	binary.BigEndian.PutUint32(lenBuf, uint32(len(data)))
+
+	conn.Write(lenBuf)
+	conn.Write(data)
+}
+
+func processRequest(req map[string]interface{}) map[string]interface{} {
+	switch req["type"] {
+
+	case "produce":
+		topicName := req["topic"].(string)
+		key := req["key"].(string)
+		message := req["message"].(string)
+
+		topic, _ := b.GetOrCreateTopic(topicName)
+
+		partition, offset, _ := topic.Produce(key, []byte(message))
+
+		return map[string]interface{}{
+			"status":    "ok",
+			"partition": partition,
+			"offset":    offset,
+		}
+
+	case "consume":
+		topicName := req["topic"].(string)
+		group := req["group"].(string)
+		consumer := req["consumer_id"].(string)
+
+		topic, _ := b.GetOrCreateTopic(topicName)
+
+		msg, partition, offset, err := topic.ConsumeFromGroup(group, consumer)
+		if err != nil {
+			return map[string]interface{}{"error": err.Error()}
+		}
+
+		return map[string]interface{}{
+			"message":   msg,
+			"partition": partition,
+			"offset":    offset,
+		}
+	}
+
+	return map[string]interface{}{"error": "unknown type"}
 }
